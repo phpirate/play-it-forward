@@ -4,6 +4,7 @@ import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
 import '../effects/particle_factory.dart';
+import '../managers/tutorial_manager.dart';
 
 class Bird extends PositionComponent with HasGameRef<PlayItForwardGame>, CollisionCallbacks {
   Bird() : super(size: Vector2(55, 35), anchor: Anchor.centerLeft);
@@ -58,6 +59,11 @@ class Bird extends PositionComponent with HasGameRef<PlayItForwardGame>, Collisi
 
     // Check for near-miss with player
     gameRef.player.checkNearMiss(this);
+
+    // Tutorial hint when bird is close to player
+    if (position.x < gameRef.size.x * 0.7) {
+      TutorialManager.instance.tryShowHint(TutorialManager.hintBird);
+    }
 
     // Animate wing flapping (smooth sine wave)
     _wingTimer += dt * wingFlapSpeed;

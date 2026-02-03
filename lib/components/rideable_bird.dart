@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
 import '../managers/audio_manager.dart';
 import '../effects/particle_factory.dart';
+import '../managers/tutorial_manager.dart';
 import 'coin.dart';
 
 /// A large bird that the player can ride when stomped on
@@ -75,6 +76,11 @@ class RideableBird extends PositionComponent
     final groundY = gameRef.ground.getGroundYAt(position.x);
     position.y = groundY - 80; // Hovering above ground
 
+    // Tutorial hint when rideable bird is visible
+    if (position.x < gameRef.size.x * 0.8) {
+      TutorialManager.instance.tryShowHint(TutorialManager.hintRideableBird);
+    }
+
     // Remove when off screen (player missed it)
     if (position.x < -size.x) {
       removeFromParent();
@@ -84,19 +90,19 @@ class RideableBird extends PositionComponent
   void _updateRiding(double dt) {
     _rideTimer += dt;
 
-    // Fly FORWARD (to the right) over obstacles
-    // Bird moves faster than game scroll, so it advances into upcoming obstacles
-    final forwardSpeed = gameRef.effectiveGameSpeed + 200; // Fly ahead of the game
-    position.x += forwardSpeed * dt;
+    // Bird stays at a fixed screen X position (like the player normally does)
+    // This keeps the bird visible on screen while the world scrolls past
+    const targetScreenX = 120.0; // Slightly ahead of normal player position
+    position.x = targetScreenX;
 
-    // Get ground height at bird's position
-    final groundY = gameRef.ground.getGroundYAt(position.x);
+    // Get ground height at bird's position for reference
+    final groundY = gameRef.ground.getGroundYAt(position.x + 100);
 
-    // Vary flying height for interesting path
+    // Vary flying height for interesting path - high enough to clear obstacles
     _heightChangeTimer += dt;
     if (_heightChangeTimer >= 1.5) {
       _heightChangeTimer = 0;
-      _targetHeight = 100 + _random.nextDouble() * 80;
+      _targetHeight = 120 + _random.nextDouble() * 60; // Fly high above obstacles
     }
     _flyHeight += (_targetHeight - _flyHeight) * dt * 2;
 
@@ -104,10 +110,10 @@ class RideableBird extends PositionComponent
     position.y = groundY - _flyHeight;
 
     // Update player position to ride on bird
-    gameRef.player.position.x = position.x - 20;
-    gameRef.player.position.y = position.y - 15;
+    gameRef.player.position.x = position.x + 10;
+    gameRef.player.position.y = position.y - 10;
 
-    // Spawn coins along the flight path
+    // Spawn coins ahead along the flight path
     _coinTimer += dt;
     if (_coinTimer >= coinInterval) {
       _coinTimer = 0;
@@ -118,16 +124,11 @@ class RideableBird extends PositionComponent
     if (_rideTimer >= rideDuration) {
       _endRide();
     }
-
-    // Also end if bird goes too far off screen to the right
-    if (position.x > gameRef.size.x + 500) {
-      _endRide();
-    }
   }
 
   void _spawnRideCoin() {
-    // Spawn coins ahead of the bird
-    final coinX = position.x + 150 + _random.nextDouble() * 100;
+    // Spawn coins ahead of the bird (off-screen to the right, they'll scroll in)
+    final coinX = gameRef.size.x + 50 + _random.nextDouble() * 100;
     final coinY = position.y + _random.nextDouble() * 60 - 30;
     gameRef.add(Coin(position: Vector2(coinX, coinY)));
   }
@@ -144,6 +145,9 @@ class RideableBird extends PositionComponent
 
     // Notify player they're riding
     gameRef.player.startRiding(this);
+
+    // Show throw stone hint
+    TutorialManager.instance.tryShowHint(TutorialManager.hintThrowStone);
 
     // Play sound
     AudioManager.instance.playSfx('powerup.mp3');

@@ -6,6 +6,7 @@ import '../game/play_it_forward_game.dart';
 import '../managers/audio_manager.dart';
 import '../managers/power_up_manager.dart';
 import '../managers/character_manager.dart';
+import '../managers/tutorial_manager.dart';
 import '../models/character.dart';
 import '../effects/particle_factory.dart';
 import '../effects/squash_stretch.dart';
@@ -1038,6 +1039,9 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
       jumpHoldTime = maxJumpHoldTime;
       _jumpCount = 1;
       AudioManager.instance.playSfx('jump.mp3');
+
+      // Tutorial hint for double jump after first jump
+      TutorialManager.instance.tryShowHint(TutorialManager.hintDoubleJump);
     } else if (_jumpCount < maxJumps) {
       // Double jump (air jump)
       velocityY = airJumpForce;
@@ -1094,6 +1098,9 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
       velocityY *= 0.3;
     }
 
+    // Tutorial hint for glide after dashing
+    TutorialManager.instance.tryShowHint(TutorialManager.hintGlide);
+
     AudioManager.instance.playSfx('jump.mp3');
   }
 
@@ -1115,6 +1122,9 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
     _isGroundPounding = true;
     _isGliding = false;
     velocityY = groundPoundForce;
+
+    // Tutorial hint shown when ground pound is used
+    TutorialManager.instance.tryShowHint(TutorialManager.hintGroundPound);
 
     AudioManager.instance.playSfx('jump.mp3');
   }

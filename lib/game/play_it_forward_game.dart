@@ -15,6 +15,7 @@ import '../managers/fever_manager.dart';
 import '../managers/character_manager.dart';
 import '../managers/world_manager.dart';
 import '../managers/mission_manager.dart';
+import '../managers/tutorial_manager.dart';
 import '../effects/screen_shake.dart';
 import '../effects/day_night_cycle.dart';
 import '../effects/speed_trail.dart';
@@ -87,10 +88,11 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
   Future<void> onLoad() async {
     await super.onLoad();
 
-    // Initialize character, world, and mission managers
+    // Initialize character, world, mission, and tutorial managers
     await CharacterManager.instance.load();
     await WorldManager.instance.load();
     await MissionManager.instance.load();
+    await TutorialManager.instance.load();
 
     // Initialize day/night cycle (must be before background)
     _dayNightCycle = DayNightCycle();
@@ -212,6 +214,14 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
         _cleanupTimer = 0;
         _cleanupOffscreenComponents();
       }
+
+      // Tutorial hint for dash after 5 seconds of gameplay
+      if (_gameTime >= 5.0 && _gameTime < 6.0) {
+        TutorialManager.instance.tryShowHint(TutorialManager.hintDash);
+      }
+
+      // Update tutorial manager
+      TutorialManager.instance.update(dt);
     }
   }
 
@@ -350,8 +360,14 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
 
     overlays.remove('mainMenu');
     overlays.add('hud');
+    overlays.add('tutorialHint');
 
     AudioManager.instance.playBgm('game_music.mp3');
+
+    // Show initial tutorial hint
+    Future.delayed(const Duration(milliseconds: 500), () {
+      TutorialManager.instance.tryShowHint(TutorialManager.hintTapToJump);
+    });
   }
 
   void pauseGame() {
@@ -401,6 +417,7 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
     AudioManager.instance.stopBgm();
 
     overlays.remove('hud');
+    overlays.remove('tutorialHint');
     overlays.add('gameOver');
   }
 
@@ -432,6 +449,7 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
     overlays.remove('gameOver');
     overlays.remove('hud');
     overlays.remove('pause');
+    overlays.remove('tutorialHint');
     overlays.add('mainMenu');
 
     if (paused) {

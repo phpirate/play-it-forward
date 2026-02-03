@@ -3,6 +3,7 @@ import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
+import '../managers/tutorial_manager.dart';
 
 /// A soul collectible that gives the player an extra life
 /// Rarer than coins, ghostly ethereal appearance
@@ -47,6 +48,11 @@ class Soul extends PositionComponent with HasGameRef<PlayItForwardGame> {
 
     // Slow rotation
     _rotationAngle += dt * 0.5;
+
+    // Tutorial hint when soul is visible
+    if (position.x < gameRef.size.x * 0.8) {
+      TutorialManager.instance.tryShowHint(TutorialManager.hintSoul);
+    }
 
     // Remove when off screen
     if (position.x < -50) {

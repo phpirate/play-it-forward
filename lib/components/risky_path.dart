@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
+import '../managers/tutorial_manager.dart';
 import 'coin.dart';
 import 'treasure_chest.dart';
 
@@ -73,6 +74,11 @@ class RiskyPath extends PositionComponent with HasGameRef<PlayItForwardGame> {
     if (!_coinsSpawned && position.x < gameRef.size.x + 50) {
       _spawnRewards();
       _coinsSpawned = true;
+    }
+
+    // Tutorial hint when risky path is visible
+    if (position.x < gameRef.size.x * 0.9) {
+      TutorialManager.instance.tryShowHint(TutorialManager.hintRiskyPath);
     }
 
     // Remove when fully off screen

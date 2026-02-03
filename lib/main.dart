@@ -11,6 +11,7 @@ import 'overlays/settings_overlay.dart';
 import 'overlays/character_select_overlay.dart';
 import 'overlays/world_select_overlay.dart';
 import 'overlays/missions_overlay.dart';
+import 'overlays/tutorial_hint_overlay.dart';
 import 'managers/audio_manager.dart';
 import 'managers/effects_manager.dart';
 
@@ -86,6 +87,7 @@ class _GamePageState extends State<GamePage> {
           'characterSelect': (context, game) => CharacterSelectOverlay(game: game),
           'worldSelect': (context, game) => WorldSelectOverlay(game: game),
           'missions': (context, game) => MissionsOverlay(game: game),
+          'tutorialHint': (context, game) => TutorialHintOverlay(game: game),
         },
         initialActiveOverlays: const ['mainMenu'],
       ),

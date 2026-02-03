@@ -2,6 +2,7 @@ import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
+import '../managers/tutorial_manager.dart';
 
 /// A tall vertical wall that the player can wall-jump off of
 class Wall extends PositionComponent with HasGameRef<PlayItForwardGame> {
@@ -29,6 +30,11 @@ class Wall extends PositionComponent with HasGameRef<PlayItForwardGame> {
     // Move with game speed
     position.x -= gameRef.effectiveGameSpeed * dt;
     position.y = gameRef.ground.getGroundYAt(position.x);
+
+    // Tutorial hint when wall is visible
+    if (position.x < gameRef.size.x * 0.8) {
+      TutorialManager.instance.tryShowHint(TutorialManager.hintWall);
+    }
 
     // Remove when off screen
     if (position.x < -50) {

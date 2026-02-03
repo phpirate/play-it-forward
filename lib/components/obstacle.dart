@@ -2,6 +2,7 @@ import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
+import '../managers/tutorial_manager.dart';
 
 enum ObstacleType { crate, spike, tallCrate }
 
@@ -97,6 +98,11 @@ class Obstacle extends PositionComponent with HasGameRef<PlayItForwardGame> {
 
     position.x -= gameRef.effectiveGameSpeed * dt;
     position.y = gameRef.ground.getGroundYAt(position.x);
+
+    // Tutorial hint for slide when obstacle is visible
+    if (position.x < gameRef.size.x * 0.8) {
+      TutorialManager.instance.tryShowHint(TutorialManager.hintSlide);
+    }
 
     gameRef.player.checkNearMiss(this);
 

@@ -4,6 +4,7 @@ import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
 import '../managers/power_up_manager.dart';
+import '../managers/tutorial_manager.dart';
 import '../effects/particle_factory.dart';
 
 class PowerUp extends PositionComponent with HasGameRef<PlayItForwardGame> {
@@ -50,6 +51,11 @@ class PowerUp extends PositionComponent with HasGameRef<PlayItForwardGame> {
     // Bob up and down
     _bobTime += dt * bobSpeed;
     position.y = _startY + sin(_bobTime * pi * 2) * bobAmount;
+
+    // Tutorial hint when power-up is visible
+    if (position.x < gameRef.size.x * 0.8) {
+      TutorialManager.instance.tryShowHint(TutorialManager.hintPowerUp);
+    }
 
     // Remove when off screen
     if (position.x < -50) {

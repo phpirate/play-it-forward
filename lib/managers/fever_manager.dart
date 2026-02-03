@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'character_manager.dart';
 import 'mission_manager.dart';
+import 'tutorial_manager.dart';
 import '../models/character.dart';
 
 /// Manages the Fever Mode system
@@ -73,6 +74,9 @@ class FeverManager extends ChangeNotifier {
 
     // Track for missions
     MissionManager.instance.onFeverActivated();
+
+    // Tutorial hint for fever mode
+    TutorialManager.instance.tryShowHint(TutorialManager.hintFever);
 
     notifyListeners();
   }

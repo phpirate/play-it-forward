@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
 import '../managers/power_up_manager.dart';
 import '../managers/audio_manager.dart';
+import '../managers/tutorial_manager.dart';
 import '../effects/score_popup.dart';
 
 /// Treasure chest tiers with different rewards
@@ -59,6 +60,11 @@ class TreasureChest extends PositionComponent
 
     // Move with game speed
     position.x -= gameRef.effectiveGameSpeed * dt;
+
+    // Tutorial hint when chest is visible
+    if (position.x < gameRef.size.x * 0.8 && !_isCollected) {
+      TutorialManager.instance.tryShowHint(TutorialManager.hintTreasureChest);
+    }
 
     // Remove if off screen
     if (position.x < -60) {

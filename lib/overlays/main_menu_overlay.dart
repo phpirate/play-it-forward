@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
 import '../managers/score_manager.dart';
+import '../managers/tutorial_manager.dart';
 
 class MainMenuOverlay extends StatelessWidget {
   final PlayItForwardGame game;
@@ -120,7 +121,32 @@ class MainMenuOverlay extends StatelessWidget {
                 onPressed: () => game.showSettings(),
               ),
 
-              const SizedBox(height: 40),
+              const SizedBox(height: 20),
+
+              // Reset Tutorial Button (for testing)
+              TextButton(
+                onPressed: () async {
+                  await TutorialManager.instance.resetAll();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Tutorial reset! All hints will show again.'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                },
+                child: const Text(
+                  'Reset Tutorial',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white60,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 20),
 
               // Footer
               const Text(
