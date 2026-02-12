@@ -79,6 +79,27 @@ class Bird extends PositionComponent with HasGameRef<PlayItForwardGame>, Collisi
   void render(Canvas canvas) {
     super.render(canvas);
 
+    // Bird warning glow when player has Skyler's ability
+    if (gameRef.hasBirdWarning && position.x > gameRef.size.x * 0.5) {
+      // Pulsing warning glow
+      final pulse = (sin(_wingTimer * 3) + 1) / 2; // 0 to 1
+      final warningPaint = Paint()
+        ..color = Color.fromRGBO(255, 100, 100, 0.3 + pulse * 0.3)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15);
+      canvas.drawCircle(
+        Offset(size.x / 2, size.y / 2),
+        35 + pulse * 10,
+        warningPaint,
+      );
+
+      // Warning exclamation
+      final textPaint = Paint()
+        ..color = Colors.red.withValues(alpha: 0.6 + pulse * 0.4)
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke;
+      canvas.drawCircle(Offset(size.x / 2, -10), 8, textPaint);
+    }
+
     // Flip horizontally so bird faces left (direction of flight)
     canvas.save();
     canvas.translate(size.x, 0);

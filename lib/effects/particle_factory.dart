@@ -405,4 +405,103 @@ class ParticleFactory {
       ),
     );
   }
+
+  /// Creates a sparkle effect for NPCs who need help
+  /// Single sparkle that floats upward
+  static ParticleSystemComponent? createSparkle(Vector2 position, Color color) {
+    if (!EffectsManager.instance.particlesEnabled) return null;
+
+    return ParticleSystemComponent(
+      particle: Particle.generate(
+        count: 1,
+        lifespan: 1.0,
+        generator: (i) {
+          return AcceleratedParticle(
+            acceleration: Vector2(0, -20),
+            speed: Vector2(
+              _random.nextDouble() * 20 - 10,
+              -30 - _random.nextDouble() * 20,
+            ),
+            position: position.clone(),
+            child: ComputedParticle(
+              renderer: (canvas, particle) {
+                final opacity = 1.0 - particle.progress;
+                final size = 3 + sin(particle.progress * pi * 3) * 2;
+
+                // Draw star shape
+                final paint = Paint()..color = color.withValues(alpha: opacity);
+                canvas.drawCircle(Offset.zero, size, paint);
+
+                // Inner glow
+                canvas.drawCircle(
+                  Offset.zero,
+                  size * 0.5,
+                  Paint()..color = Colors.white.withValues(alpha: opacity * 0.8),
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Creates celebration particles when completing a level
+  /// Confetti burst in multiple colors
+  static ParticleSystemComponent? createCelebration(Vector2 position) {
+    if (!EffectsManager.instance.particlesEnabled) return null;
+
+    final colors = [
+      const Color(0xFFFF6B6B), // Red
+      const Color(0xFFFFE066), // Yellow
+      const Color(0xFF4ECDC4), // Teal
+      const Color(0xFF95E1D3), // Light green
+      const Color(0xFFFF69B4), // Pink
+      const Color(0xFF9370DB), // Purple
+    ];
+
+    return ParticleSystemComponent(
+      particle: Particle.generate(
+        count: _getCount(30),
+        lifespan: 1.5,
+        generator: (i) {
+          final angle = _random.nextDouble() * 2 * pi;
+          final speed = 100 + _random.nextDouble() * 150;
+          final color = colors[_random.nextInt(colors.length)];
+          final rotationSpeed = _random.nextDouble() * 10 - 5;
+
+          return AcceleratedParticle(
+            acceleration: Vector2(0, 200), // Gravity
+            speed: Vector2(
+              cos(angle) * speed,
+              sin(angle) * speed - 100, // Upward bias
+            ),
+            position: position.clone(),
+            child: ComputedParticle(
+              renderer: (canvas, particle) {
+                final opacity = 1.0 - particle.progress * 0.5;
+                final rotation = particle.progress * rotationSpeed * pi;
+
+                canvas.save();
+                canvas.rotate(rotation);
+
+                // Confetti rectangle
+                final paint = Paint()..color = color.withValues(alpha: opacity);
+                canvas.drawRect(
+                  Rect.fromCenter(
+                    center: Offset.zero,
+                    width: 4 + _random.nextDouble() * 4,
+                    height: 8 + _random.nextDouble() * 4,
+                  ),
+                  paint,
+                );
+
+                canvas.restore();
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
 }

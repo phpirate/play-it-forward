@@ -2,6 +2,8 @@ import 'dart:math';
 import 'package:flame/components.dart';
 import '../game/play_it_forward_game.dart';
 import '../managers/power_up_manager.dart';
+import '../managers/level_manager.dart';
+import '../models/level.dart';
 import 'obstacle.dart';
 import 'coin.dart';
 import 'bird.dart';
@@ -12,6 +14,7 @@ import 'soul.dart';
 import 'treasure_chest.dart';
 import 'risky_path.dart';
 import 'rideable_bird.dart';
+import 'npc.dart';
 
 class ObstacleManager extends Component with HasGameRef<PlayItForwardGame> {
   final Random _random = Random();
@@ -24,8 +27,26 @@ class ObstacleManager extends Component with HasGameRef<PlayItForwardGame> {
   double _timeSinceLastRiskyPath = 0;
   double _timeSinceLastRideableBird = 0;
 
-  double get spawnInterval => 2.0 - (gameRef.gameSpeed - 200) / 400; // Faster spawn as speed increases
-  double get minSpawnInterval => 1.0;
+  /// Get current level difficulty (null for endless mode)
+  LevelDifficulty? get _levelDifficulty => LevelManager.instance.currentDifficulty;
+
+  /// Obstacle frequency multiplier from level
+  double get _obstacleFrequency => _levelDifficulty?.obstacleFrequency ?? 1.0;
+
+  /// Bird spawn chance from level
+  double get _birdChance => _levelDifficulty?.birdChance ?? 0.25;
+
+  /// Whether walls are enabled in current level
+  bool get _hasWalls => _levelDifficulty?.hasWalls ?? true;
+
+  /// Whether power-ups are enabled in current level
+  bool get _hasPowerUps => _levelDifficulty?.hasPowerUps ?? true;
+
+  double get spawnInterval {
+    final baseInterval = 2.0 - (gameRef.gameSpeed - 200) / 400;
+    return baseInterval / _obstacleFrequency; // Apply level difficulty
+  }
+  double get minSpawnInterval => 1.0 / _obstacleFrequency;
   double get coinSpawnInterval => 1.5;
   double get powerUpSpawnInterval => 8.0;
   double get powerUpSpawnChance => 0.25;
@@ -63,8 +84,8 @@ class ObstacleManager extends Component with HasGameRef<PlayItForwardGame> {
       _timeSinceLastCoin = 0;
     }
 
-    // Spawn power-ups
-    if (_timeSinceLastPowerUp >= powerUpSpawnInterval) {
+    // Spawn power-ups (if enabled in level)
+    if (_hasPowerUps && _timeSinceLastPowerUp >= powerUpSpawnInterval) {
       if (_random.nextDouble() < powerUpSpawnChance) {
         _spawnPowerUp();
       }
@@ -161,33 +182,40 @@ class ObstacleManager extends Component with HasGameRef<PlayItForwardGame> {
     gameRef.add(bird);
   }
 
+  /// Get allowed obstacles for current level (defaults to all for endless)
+  List<ObstacleType> get _allowedObstacles =>
+      _levelDifficulty?.allowedObstacles ?? ObstacleType.values.toList();
+
   void _spawnObstacle() {
     final spawnX = gameRef.size.x + 50;
     final groundY = gameRef.ground.getGroundYAt(spawnX);
 
     final roll = _random.nextDouble();
 
-    // 25% chance to spawn a bird
-    if (roll < 0.25) {
+    // Bird chance from level settings
+    if (roll < _birdChance) {
       _spawnBird();
       return;
     }
 
-    // 10% chance to spawn a wall (for wall jumping)
-    if (roll < 0.35) {
+    // 10% chance to spawn a wall (for wall jumping) - if enabled
+    if (_hasWalls && roll < _birdChance + 0.10) {
       _spawnWall();
       return;
     }
 
     // 10% chance to spawn a bouncy platform
-    if (roll < 0.45) {
+    final bouncyThreshold = _birdChance + (_hasWalls ? 0.20 : 0.10);
+    if (roll < bouncyThreshold) {
       _spawnBouncyPlatform();
       return;
     }
 
-    // Regular obstacle
-    final types = ObstacleType.values;
-    final type = types[_random.nextInt(types.length)];
+    // Regular obstacle - only spawn allowed types for this level
+    final allowedTypes = _allowedObstacles;
+    if (allowedTypes.isEmpty) return;
+
+    final type = allowedTypes[_random.nextInt(allowedTypes.length)];
 
     final obstacle = Obstacle(
       type: type,
@@ -284,7 +312,7 @@ class ObstacleManager extends Component with HasGameRef<PlayItForwardGame> {
     _timeSinceLastRiskyPath = 0;
     _timeSinceLastRideableBird = 0;
 
-    // Remove all existing obstacles, birds, coins, power-ups, walls, platforms, souls, chests, risky paths, rideable birds
+    // Remove all existing obstacles, birds, coins, power-ups, walls, platforms, souls, chests, risky paths, rideable birds, NPCs
     gameRef.children.whereType<Obstacle>().forEach((o) => o.removeFromParent());
     gameRef.children.whereType<Bird>().forEach((b) => b.removeFromParent());
     gameRef.children.whereType<Coin>().forEach((c) => c.removeFromParent());
@@ -295,5 +323,36 @@ class ObstacleManager extends Component with HasGameRef<PlayItForwardGame> {
     gameRef.children.whereType<TreasureChest>().forEach((tc) => tc.removeFromParent());
     gameRef.children.whereType<RiskyPath>().forEach((rp) => rp.removeFromParent());
     gameRef.children.whereType<RideableBird>().forEach((rb) => rb.removeFromParent());
+    gameRef.children.whereType<NPC>().forEach((npc) => npc.removeFromParent());
+  }
+
+  /// Clear obstacles near a position (used for respawning)
+  void clearNearbyObstacles(double centerX, double radius) {
+    final minX = centerX - radius;
+    final maxX = centerX + radius;
+
+    // Remove obstacles in range
+    for (final obstacle in gameRef.children.whereType<Obstacle>().toList()) {
+      if (obstacle.position.x >= minX && obstacle.position.x <= maxX) {
+        obstacle.removeFromParent();
+      }
+    }
+
+    // Remove birds in range
+    for (final bird in gameRef.children.whereType<Bird>().toList()) {
+      if (bird.position.x >= minX && bird.position.x <= maxX) {
+        bird.removeFromParent();
+      }
+    }
+
+    // Remove walls in range
+    for (final wall in gameRef.children.whereType<Wall>().toList()) {
+      if (wall.position.x >= minX && wall.position.x <= maxX) {
+        wall.removeFromParent();
+      }
+    }
+
+    // Reset spawn timer to give player breathing room
+    _timeSinceLastObstacle = -1.5; // Delay next obstacle spawn
   }
 }

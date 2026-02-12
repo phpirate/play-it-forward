@@ -49,9 +49,23 @@ class Coin extends PositionComponent with HasGameRef<PlayItForwardGame> {
     final magnetActive = gameRef.powerUpManager.isActive(PowerUpType.magnet);
     final hasWizardAura = CharacterManager.instance.selectedCharacter.ability == CharacterAbility.magnetAura;
 
-    // Wizard aura provides a smaller passive magnet effect
-    final effectiveRange = magnetActive ? magnetRange : (hasWizardAura ? magnetRange * 0.6 : 0.0);
-    final effectiveSpeed = magnetActive ? magnetSpeed : (hasWizardAura ? magnetSpeed * 0.7 : 0.0);
+    // Follower bonus provides passive magnet range (Skyler, Flora, Professor Oak)
+    final followerMagnetRange = gameRef.extraCoinMagnetRange;
+
+    // Calculate effective range: power-up > wizard aura > follower bonus (all stack)
+    double effectiveRange = 0.0;
+    double effectiveSpeed = 0.0;
+
+    if (magnetActive) {
+      effectiveRange = magnetRange + followerMagnetRange;
+      effectiveSpeed = magnetSpeed;
+    } else if (hasWizardAura) {
+      effectiveRange = magnetRange * 0.6 + followerMagnetRange;
+      effectiveSpeed = magnetSpeed * 0.7;
+    } else if (followerMagnetRange > 0) {
+      effectiveRange = followerMagnetRange;
+      effectiveSpeed = magnetSpeed * 0.5; // Slower attraction from followers
+    }
 
     if (effectiveRange > 0) {
       final playerPos = gameRef.player.position;

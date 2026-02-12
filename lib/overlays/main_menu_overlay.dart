@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
 import '../managers/score_manager.dart';
 import '../managers/tutorial_manager.dart';
+import '../managers/level_manager.dart';
 
 class MainMenuOverlay extends StatelessWidget {
   final PlayItForwardGame game;
@@ -16,8 +17,8 @@ class MainMenuOverlay extends StatelessWidget {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Colors.blue.shade300.withOpacity(0.8),
-            Colors.blue.shade700.withOpacity(0.8),
+            Colors.blue.shade300,
+            Colors.blue.shade700,
           ],
         ),
       ),
@@ -69,10 +70,19 @@ class MainMenuOverlay extends StatelessWidget {
                   ),
                 ),
 
-              // Play Button
+              // Campaign Button
               _MenuButton(
-                text: 'PLAY',
+                text: 'CAMPAIGN',
                 color: Colors.green,
+                onPressed: () => game.showLevelSelect(),
+              ),
+
+              const SizedBox(height: 15),
+
+              // Endless Mode Button
+              _MenuButton(
+                text: 'ENDLESS',
+                color: Colors.blue,
                 onPressed: () => game.startGame(),
               ),
 
@@ -123,27 +133,56 @@ class MainMenuOverlay extends StatelessWidget {
 
               const SizedBox(height: 20),
 
-              // Reset Tutorial Button (for testing)
-              TextButton(
-                onPressed: () async {
-                  await TutorialManager.instance.resetAll();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Tutorial reset! All hints will show again.'),
-                        duration: Duration(seconds: 2),
+              // Reset buttons row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Reset Tutorial Button (for testing)
+                  TextButton(
+                    onPressed: () async {
+                      await TutorialManager.instance.resetAll();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Tutorial reset!'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text(
+                      'Reset Tutorial',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white60,
+                        decoration: TextDecoration.underline,
                       ),
-                    );
-                  }
-                },
-                child: const Text(
-                  'Reset Tutorial',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.white60,
-                    decoration: TextDecoration.underline,
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  // Reset Campaign Button (for testing)
+                  TextButton(
+                    onPressed: () async {
+                      await LevelManager.instance.resetAll();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Campaign reset! All levels locked.'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text(
+                      'Reset Campaign',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.white60,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
+                ],
               ),
 
               const SizedBox(height: 20),

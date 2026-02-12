@@ -7,6 +7,8 @@ import '../components/player.dart';
 import '../components/ground.dart';
 import '../components/obstacle_manager.dart';
 import '../components/parallax_background.dart';
+import '../components/npc.dart';
+import '../components/follower.dart';
 import 'dart:math';
 import '../managers/score_manager.dart';
 import '../managers/audio_manager.dart';
@@ -16,6 +18,7 @@ import '../managers/character_manager.dart';
 import '../managers/world_manager.dart';
 import '../managers/mission_manager.dart';
 import '../managers/tutorial_manager.dart';
+import '../managers/level_manager.dart';
 import '../effects/screen_shake.dart';
 import '../effects/day_night_cycle.dart';
 import '../effects/speed_trail.dart';
@@ -27,8 +30,9 @@ import '../effects/shooting_stars.dart';
 import '../effects/score_popup.dart';
 import '../effects/impact_effects.dart';
 import '../components/background_birds.dart';
+import '../data/level_data.dart';
 
-enum GameState { menu, playing, paused, gameOver }
+enum GameState { menu, playing, paused, gameOver, levelIntro, levelComplete }
 
 class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, HasCollisionDetection {
   late Player player;
@@ -51,15 +55,38 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
   // Fever mode
   late FeverManager feverManager;
 
+  // Level/Campaign system
+  final List<Follower> _followers = [];
+  NPC? _levelNpc;
+  bool _npcSpawned = false;
+
+  // Lives system for campaign mode
+  int _lives = 5;
+  static const int maxLives = 5;
+  static const double respawnInvincibilityDuration = 3.0;
+
+  int get lives => _lives;
+
   GameState gameState = GameState.menu;
 
   late double gameSpeed;
 
-  /// Returns game speed accounting for slow motion power-up
-  double get effectiveGameSpeed =>
-      powerUpManager.isActive(PowerUpType.slowMotion)
-          ? gameSpeed * 0.5
-          : gameSpeed;
+  /// Returns game speed accounting for slow motion power-up and mud slow
+  double get effectiveGameSpeed {
+    double speed = gameSpeed;
+
+    // Slow motion power-up
+    if (powerUpManager.isActive(PowerUpType.slowMotion)) {
+      speed *= 0.5;
+    }
+
+    // Mud slow effect
+    if (player.isInMud) {
+      speed *= player.mudSpeedMultiplier;
+    }
+
+    return speed;
+  }
   double get initialGameSpeed => ScoreManager.instance.initialSpeed;
   final double maxGameSpeed = 800;
   final double speedIncrement = 10;
@@ -82,17 +109,61 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
   // Combo system
   int comboCount = 0;
   double comboTimer = 0;
-  static const double comboWindow = 1.5; // Seconds to maintain combo
+  static const double baseComboWindow = 1.5; // Seconds to maintain combo
+
+  /// Get effective combo window with follower bonuses
+  double get comboWindow {
+    if (LevelManager.instance.isPlayingCampaign) {
+      final bonus = LevelManager.instance.cumulativeBonus;
+      return baseComboWindow * (1 + bonus.comboTimerBonus);
+    }
+    return baseComboWindow;
+  }
+
+  /// Get follower coin value multiplier
+  double get followerCoinMultiplier {
+    if (LevelManager.instance.isPlayingCampaign) {
+      final bonus = LevelManager.instance.cumulativeBonus;
+      return 1 + bonus.coinValueBonus;
+    }
+    return 1.0;
+  }
+
+  /// Get follower score multiplier
+  double get followerScoreMultiplier {
+    if (LevelManager.instance.isPlayingCampaign) {
+      final bonus = LevelManager.instance.cumulativeBonus;
+      return 1 + bonus.scoreMultiplierBonus;
+    }
+    return 1.0;
+  }
+
+  /// Check if bird warning is active (from Skyler the bird)
+  bool get hasBirdWarning {
+    if (LevelManager.instance.isPlayingCampaign) {
+      return LevelManager.instance.cumulativeBonus.birdWarning;
+    }
+    return false;
+  }
+
+  /// Get extra coin magnet range from followers
+  double get extraCoinMagnetRange {
+    if (LevelManager.instance.isPlayingCampaign) {
+      return LevelManager.instance.cumulativeBonus.coinMagnetRange;
+    }
+    return 0.0;
+  }
 
   @override
   Future<void> onLoad() async {
     await super.onLoad();
 
-    // Initialize character, world, mission, and tutorial managers
+    // Initialize character, world, mission, tutorial, and level managers
     await CharacterManager.instance.load();
     await WorldManager.instance.load();
     await MissionManager.instance.load();
     await TutorialManager.instance.load();
+    await LevelManager.instance.load();
 
     // Initialize day/night cycle (must be before background)
     _dayNightCycle = DayNightCycle();
@@ -195,6 +266,20 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
       final multiplier =
           powerUpManager.isActive(PowerUpType.doubleScore) ? 2 : 1;
       score = ((_gameTime * 10).toInt() + (coins * 10)) * multiplier;
+
+      // Campaign level tracking
+      if (LevelManager.instance.isPlayingCampaign) {
+        // Calculate distance based on game time and speed
+        final distance = _gameTime * (effectiveGameSpeed / 10);
+        LevelManager.instance.setDistance(distance);
+        LevelManager.instance.updateTime(dt);
+
+        // Check if we should spawn the NPC (goal marker)
+        _checkNpcSpawn(distance);
+
+        // Check if player reached the NPC
+        _checkLevelComplete();
+      }
 
       // Update speed trail
       speedTrail.updateSpeed(gameSpeed);
@@ -400,6 +485,14 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
 
   /// Called after death animation completes
   void triggerGameOver() {
+    // Check if we're in campaign mode with lives remaining
+    if (LevelManager.instance.isPlayingCampaign && _lives > 1) {
+      // Lose a life and respawn
+      _lives--;
+      _respawnPlayer();
+      return;
+    }
+
     gameState = GameState.gameOver;
 
     // Save high score
@@ -414,6 +507,17 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
     // Check and complete missions
     lastCompletedMissions = MissionManager.instance.endRun(score, coins);
 
+    // End campaign run if active (without completing the level)
+    if (LevelManager.instance.isPlayingCampaign) {
+      LevelManager.instance.endRun();
+    }
+
+    // Remove followers
+    for (final follower in _followers) {
+      follower.removeFromParent();
+    }
+    _followers.clear();
+
     AudioManager.instance.stopBgm();
 
     overlays.remove('hud');
@@ -421,40 +525,51 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
     overlays.add('gameOver');
   }
 
-  void returnToMenu() {
-    gameState = GameState.menu;
-    gameSpeed = initialGameSpeed;
-    score = 0;
-    coins = 0;
-    souls = 0;
-    _isInvincible = false;
-    _invincibilityTimer = 0;
-    _gameTime = 0;
-    comboCount = 0;
-    comboTimer = 0;
+  /// Respawn player after losing a life in campaign mode
+  void _respawnPlayer() {
+    // Clear nearby obstacles
+    obstacleManager.clearNearbyObstacles(player.position.x, 200);
 
-    ground.reset();
-    player.reset();
-    obstacleManager.reset();
-    powerUpManager.reset();
-    feverManager.reset();
-    dayNightCycle.reset();
-    speedTrail.clear();
-    backgroundBirds.reset();
-    weatherSystem.reset();
-    speedLines.reset();
-    ambientParticles.reset();
-    shootingStars.reset();
+    // Reset player state
+    player.respawn();
+
+    // Give temporary invincibility
+    _isInvincible = true;
+    _invincibilityTimer = respawnInvincibilityDuration;
+
+    // Visual feedback
+    triggerScreenShake(5, 0.2);
+
+    // Show lives remaining popup
+    final popupPos = Vector2(player.position.x, player.position.y - 60);
+    add(ScorePopup(
+      position: popupPos,
+      text: '$_lives Lives Left',
+      color: const Color(0xFFFF6B6B),
+      fontSize: 22,
+    ));
+
+    // Resume game state
+    gameState = GameState.playing;
+  }
+
+  void returnToMenu() {
+    // End campaign run if active
+    if (LevelManager.instance.isPlayingCampaign) {
+      LevelManager.instance.endRun();
+    }
+
+    gameState = GameState.menu;
+    _resetGameState();
 
     overlays.remove('gameOver');
     overlays.remove('hud');
     overlays.remove('pause');
     overlays.remove('tutorialHint');
+    overlays.remove('levelIntro');
+    overlays.remove('levelComplete');
+    overlays.remove('levelSelect');
     overlays.add('mainMenu');
-
-    if (paused) {
-      resumeEngine();
-    }
 
     AudioManager.instance.playBgm('menu_music.mp3');
   }
@@ -465,9 +580,10 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
   }
 
   void collectCoin() {
-    // Apply fever multiplier to coins
+    // Apply fever multiplier and follower bonus to coins
     final feverMultiplier = feverManager.coinMultiplier;
-    coins += feverMultiplier;
+    final coinMultiplier = (feverMultiplier * followerCoinMultiplier).round();
+    coins += coinMultiplier;
 
     // Track for missions
     MissionManager.instance.onCoinCollected();
@@ -478,7 +594,7 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
     } else {
       comboCount = 1;
     }
-    comboTimer = comboWindow;
+    comboTimer = comboWindow; // Uses effective combo window with bonuses
 
     // Track combo for missions
     MissionManager.instance.onComboAchieved(comboCount);
@@ -496,15 +612,17 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
       score += (comboMultiplier - 1) * 5;
     }
 
-    // Show score popup with fever bonus
+    // Show score popup with fever bonus and follower bonus
     final popupPos = Vector2(player.position.x + 30, player.position.y - 50);
-    final coinValue = 10 * feverMultiplier;
+    final coinValue = (10 * coinMultiplier).round();
     add(ScorePopup(
       position: popupPos,
       text: '+$coinValue',
       color: feverManager.isFeverActive
           ? const Color(0xFFFF1493) // Hot pink during fever
-          : const Color(0xFFFFD700),
+          : followerCoinMultiplier > 1.0
+              ? const Color(0xFFFFB6C1) // Light pink when follower bonus active
+              : const Color(0xFFFFD700),
     ));
 
     // Show combo popup for high combos
@@ -675,4 +793,243 @@ class PlayItForwardGame extends FlameGame with TapCallbacks, KeyboardEvents, Has
 
   @override
   Color backgroundColor() => _dayNightCycle?.getCurrentSkyColor() ?? const Color(0xFF87CEEB);
+
+  // ============== CAMPAIGN/LEVEL SYSTEM ==============
+
+  /// Show level select overlay
+  void showLevelSelect() {
+    overlays.remove('mainMenu');
+    overlays.add('levelSelect');
+  }
+
+  /// Hide level select overlay
+  void hideLevelSelect() {
+    overlays.remove('levelSelect');
+    overlays.add('mainMenu');
+  }
+
+  /// Select a level and show intro
+  void selectLevel(int levelNumber) {
+    LevelManager.instance.startLevel(levelNumber);
+    overlays.remove('levelSelect');
+    gameState = GameState.levelIntro;
+    overlays.add('levelIntro');
+  }
+
+  /// Start the actual gameplay for campaign level
+  void startCampaignLevel() {
+    final levelManager = LevelManager.instance;
+    final level = levelManager.currentLevel;
+    if (level == null) return;
+
+    gameState = GameState.playing;
+
+    // Set initial speed from level difficulty
+    gameSpeed = level.difficulty.speed;
+    score = 0;
+    coins = 0;
+    souls = 0;
+    // Apply extra starting lives from followers (Flora, Doctor Grace)
+    final extraLives = LevelManager.instance.cumulativeBonus.extraStartingLives;
+    _lives = maxLives + extraLives;
+    _isInvincible = false;
+    _invincibilityTimer = 0;
+    _gameTime = 0;
+    _timeSinceLastSpeedIncrease = 0;
+    comboCount = 0;
+    comboTimer = 0;
+    _npcSpawned = false;
+    _levelNpc = null;
+
+    // Start mission tracking for this run
+    MissionManager.instance.startRun();
+
+    ground.reset();
+    player.reset();
+    obstacleManager.reset();
+    powerUpManager.reset();
+    feverManager.reset();
+    dayNightCycle.reset();
+    speedTrail.clear();
+    backgroundBirds.reset();
+    weatherSystem.reset();
+    speedLines.reset();
+    ambientParticles.reset();
+    shootingStars.reset();
+
+    // Spawn followers from previously completed levels
+    _spawnFollowers();
+
+    overlays.remove('levelIntro');
+    overlays.add('hud');
+    overlays.add('tutorialHint');
+
+    AudioManager.instance.playBgm('game_music.mp3');
+  }
+
+  /// Spawn followers for completed levels
+  void _spawnFollowers() {
+    // Remove existing followers
+    for (final follower in _followers) {
+      follower.removeFromParent();
+    }
+    _followers.clear();
+
+    // Get unlocked followers
+    final unlockedFollowers = LevelManager.instance.getUnlockedFollowers();
+    final groundY = ground.getGroundYAt(player.position.x);
+    for (int i = 0; i < unlockedFollowers.length; i++) {
+      final npcData = unlockedFollowers[i];
+      final follower = Follower(
+        data: npcData,
+        index: i,
+        position: Vector2(player.position.x - 55 - i * 45, groundY),
+      );
+      _followers.add(follower);
+      add(follower);
+    }
+  }
+
+  /// Check if NPC should spawn (near goal distance)
+  void _checkNpcSpawn(double currentDistance) {
+    if (_npcSpawned || _levelNpc != null) return;
+
+    final level = LevelManager.instance.currentLevel;
+    if (level == null) return;
+
+    // Spawn NPC when player is 100m from goal
+    if (currentDistance >= level.targetDistance - 100) {
+      _spawnLevelNpc();
+    }
+  }
+
+  /// Spawn the NPC at the goal
+  void _spawnLevelNpc() {
+    final level = LevelManager.instance.currentLevel;
+    if (level == null) return;
+
+    _npcSpawned = true;
+    final groundY = ground.getGroundYAt(size.x + 100);
+    _levelNpc = NPC(
+      data: level.npcToHelp,
+      position: Vector2(size.x + 100, groundY),
+    );
+    add(_levelNpc!);
+  }
+
+  /// Check if player has reached the NPC
+  void _checkLevelComplete() {
+    if (_levelNpc == null || _levelNpc!.isCollected) return;
+
+    // If player is riding a bird and NPC is close, end the ride
+    // so player can land and rescue the NPC
+    if (player.isRidingBird) {
+      final xDistance = (_levelNpc!.position.x - player.position.x).abs();
+      if (xDistance < 100) {
+        player.endRiding();
+      }
+      return; // Wait for player to land before checking collision
+    }
+
+    // Check collision with NPC
+    final playerBounds = player.toRect();
+    final npcBounds = _levelNpc!.toRect();
+
+    if (playerBounds.overlaps(npcBounds)) {
+      _onLevelComplete();
+    }
+  }
+
+  /// Handle level completion
+  void _onLevelComplete() {
+    if (_levelNpc == null) return;
+
+    _levelNpc!.collect();
+
+    // Add coins to level manager
+    LevelManager.instance.addCoins(coins);
+
+    // Complete the level
+    LevelManager.instance.completeLevel();
+
+    // Trigger celebration
+    triggerScreenShake(8, 0.3);
+    AudioManager.instance.playSfx('powerup.mp3');
+
+    // Show level complete overlay
+    gameState = GameState.levelComplete;
+    overlays.remove('hud');
+    overlays.remove('tutorialHint');
+    overlays.add('levelComplete');
+  }
+
+  /// Start the next level
+  void startNextLevel(int levelNumber) {
+    overlays.remove('levelComplete');
+    selectLevel(levelNumber);
+  }
+
+  /// Return to level select from level complete
+  void showLevelSelectFromComplete() {
+    overlays.remove('levelComplete');
+    LevelManager.instance.endRun();
+    gameState = GameState.menu;
+
+    // Reset game state
+    _resetGameState();
+
+    overlays.add('levelSelect');
+  }
+
+  /// Helper to reset game state
+  void _resetGameState() {
+    gameSpeed = initialGameSpeed;
+    score = 0;
+    coins = 0;
+    souls = 0;
+    _isInvincible = false;
+    _invincibilityTimer = 0;
+    _gameTime = 0;
+    comboCount = 0;
+    comboTimer = 0;
+    _npcSpawned = false;
+    _levelNpc = null;
+
+    // Remove followers
+    for (final follower in _followers) {
+      follower.removeFromParent();
+    }
+    _followers.clear();
+
+    ground.reset();
+    player.reset();
+    obstacleManager.reset();
+    powerUpManager.reset();
+    feverManager.reset();
+    dayNightCycle.reset();
+    speedTrail.clear();
+    backgroundBirds.reset();
+    weatherSystem.reset();
+    speedLines.reset();
+    ambientParticles.reset();
+    shootingStars.reset();
+
+    if (paused) {
+      resumeEngine();
+    }
+  }
+
+  /// Get current distance for HUD display
+  double get currentDistance {
+    if (LevelManager.instance.isPlayingCampaign) {
+      return LevelManager.instance.currentDistance;
+    }
+    return _gameTime * (effectiveGameSpeed / 10);
+  }
+
+  /// Get level progress for HUD (0.0 to 1.0)
+  double get levelProgress => LevelManager.instance.levelProgress;
+
+  /// Get follower count for HUD
+  int get followerCount => LevelManager.instance.completedLevels;
 }

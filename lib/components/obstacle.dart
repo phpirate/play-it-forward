@@ -1,16 +1,23 @@
+import 'dart:math';
 import 'package:flame/collisions.dart';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
 import '../managers/tutorial_manager.dart';
-
-enum ObstacleType { crate, spike, tallCrate }
+import '../models/level.dart';
 
 class Obstacle extends PositionComponent with HasGameRef<PlayItForwardGame> {
   final ObstacleType type;
 
   Obstacle({required this.type, required Vector2 position})
       : super(position: position, anchor: Anchor.bottomCenter);
+
+  // Animation state for dynamic obstacles
+  double _animationTime = 0;
+  double _rollingAngle = 0;
+  double _swingAngle = 0;
+  bool _fireActive = false;
+  double _fireTimer = 0;
 
   @override
   Future<void> onLoad() async {
@@ -25,6 +32,21 @@ class Obstacle extends PositionComponent with HasGameRef<PlayItForwardGame> {
         break;
       case ObstacleType.tallCrate:
         _buildTallCrate();
+        break;
+      case ObstacleType.rollingLog:
+        _buildRollingLog();
+        break;
+      case ObstacleType.gap:
+        _buildGap();
+        break;
+      case ObstacleType.swingingRope:
+        _buildSwingingRope();
+        break;
+      case ObstacleType.mudPuddle:
+        _buildMudPuddle();
+        break;
+      case ObstacleType.fireJet:
+        _buildFireJet();
         break;
     }
   }
@@ -90,14 +112,134 @@ class Obstacle extends PositionComponent with HasGameRef<PlayItForwardGame> {
     add(RectangleHitbox());
   }
 
+  void _buildRollingLog() {
+    size = Vector2(50, 50);
+
+    // Shadow
+    add(CustomPainterComponent(
+      painter: _ShadowPainter(width: 46, height: 10),
+      position: Vector2(2, 50),
+      size: Vector2(46, 10),
+    ));
+
+    // Rolling log visual
+    add(CustomPainterComponent(
+      painter: _RollingLogPainter(this),
+      size: size,
+    ));
+
+    add(CircleHitbox());
+  }
+
+  void _buildGap() {
+    size = Vector2(80, 100);
+
+    // Gap is a hole in the ground - deadly fall
+    add(CustomPainterComponent(
+      painter: _GapPainter(),
+      size: size,
+    ));
+
+    // Hitbox at the bottom of the gap (fall zone)
+    add(RectangleHitbox(
+      size: Vector2(60, 20),
+      position: Vector2(10, 80),
+    ));
+  }
+
+  void _buildSwingingRope() {
+    size = Vector2(30, 120);
+
+    // Swinging rope with weight at bottom
+    add(CustomPainterComponent(
+      painter: _SwingingRopePainter(this),
+      size: size,
+    ));
+
+    // Hitbox for the swinging weight
+    add(CircleHitbox(
+      radius: 15,
+      position: Vector2(0, 90),
+    ));
+  }
+
+  void _buildMudPuddle() {
+    size = Vector2(100, 20);
+
+    // Brown mud puddle
+    add(CustomPainterComponent(
+      painter: _MudPuddlePainter(),
+      size: size,
+    ));
+
+    // No hitbox - doesn't kill, just slows
+  }
+
+  void _buildFireJet() {
+    size = Vector2(40, 80);
+
+    // Fire jet from ground
+    add(CustomPainterComponent(
+      painter: _FireJetPainter(this),
+      size: size,
+    ));
+
+    // Hitbox only active when fire is on (checked dynamically)
+    add(RectangleHitbox(
+      size: Vector2(30, 60),
+      position: Vector2(5, 10),
+    ));
+  }
+
+  // Getters for painters to access animation state
+  double get rollingAngle => _rollingAngle;
+  double get swingAngle => _swingAngle;
+  bool get fireActive => _fireActive;
+  double get animationTime => _animationTime;
+
   @override
   void update(double dt) {
     super.update(dt);
 
     if (gameRef.gameState != GameState.playing) return;
 
-    position.x -= gameRef.effectiveGameSpeed * dt;
-    position.y = gameRef.ground.getGroundYAt(position.x);
+    // Update animation time
+    _animationTime += dt;
+
+    // Special behavior for different obstacle types
+    switch (type) {
+      case ObstacleType.rollingLog:
+        // Roll toward player (faster than normal scroll)
+        position.x -= (gameRef.effectiveGameSpeed + 80) * dt;
+        _rollingAngle += dt * 8; // Rotate as it rolls
+        break;
+      case ObstacleType.swingingRope:
+        // Swing back and forth
+        _swingAngle = sin(_animationTime * 3) * 0.6;
+        position.x -= gameRef.effectiveGameSpeed * dt;
+        break;
+      case ObstacleType.fireJet:
+        // Toggle fire on/off periodically
+        _fireTimer += dt;
+        if (_fireTimer > 1.5) {
+          _fireActive = !_fireActive;
+          _fireTimer = 0;
+        }
+        position.x -= gameRef.effectiveGameSpeed * dt;
+        break;
+      case ObstacleType.mudPuddle:
+        // Check if player is in mud
+        _checkMudEffect();
+        position.x -= gameRef.effectiveGameSpeed * dt;
+        break;
+      default:
+        position.x -= gameRef.effectiveGameSpeed * dt;
+    }
+
+    // Gap doesn't follow ground (it IS the ground)
+    if (type != ObstacleType.gap) {
+      position.y = gameRef.ground.getGroundYAt(position.x);
+    }
 
     // Tutorial hint for slide when obstacle is visible
     if (position.x < gameRef.size.x * 0.8) {
@@ -108,6 +250,15 @@ class Obstacle extends PositionComponent with HasGameRef<PlayItForwardGame> {
 
     if (position.x < -100) {
       removeFromParent();
+    }
+  }
+
+  void _checkMudEffect() {
+    final playerBounds = gameRef.player.toRect();
+    final mudBounds = toRect();
+    if (playerBounds.overlaps(mudBounds) && gameRef.player.isOnGround) {
+      // Slow down player temporarily (handled in player)
+      gameRef.player.applyMudSlow();
     }
   }
 }
@@ -419,4 +570,302 @@ class _SpikePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// Rolling Log Painter
+class _RollingLogPainter extends CustomPainter {
+  final Obstacle obstacle;
+  _RollingLogPainter(this.obstacle);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(obstacle.rollingAngle);
+    canvas.translate(-center.dx, -center.dy);
+
+    // Main log body (brown circle)
+    final logGradient = RadialGradient(
+      colors: [
+        const Color(0xFF8B4513), // Saddle brown
+        const Color(0xFF5D3A1A), // Darker brown
+        const Color(0xFF3E2512), // Very dark
+      ],
+    );
+    final logPaint = Paint()
+      ..shader = logGradient.createShader(Rect.fromCircle(center: center, radius: 25));
+    canvas.drawCircle(center, 23, logPaint);
+
+    // Wood rings
+    final ringPaint = Paint()
+      ..color = const Color(0xFF6B4423)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawCircle(center, 18, ringPaint);
+    canvas.drawCircle(center, 12, ringPaint);
+    canvas.drawCircle(center, 6, ringPaint);
+
+    // Center dot
+    canvas.drawCircle(center, 3, Paint()..color = const Color(0xFF3E2512));
+
+    // Bark texture lines
+    final barkPaint = Paint()
+      ..color = const Color(0xFF4A3520)
+      ..strokeWidth = 1;
+    for (int i = 0; i < 8; i++) {
+      final angle = i * pi / 4;
+      canvas.drawLine(
+        Offset(center.dx + cos(angle) * 20, center.dy + sin(angle) * 20),
+        Offset(center.dx + cos(angle) * 23, center.dy + sin(angle) * 23),
+        barkPaint,
+      );
+    }
+
+    canvas.restore();
+
+    // Outline
+    final outlinePaint = Paint()
+      ..color = const Color(0xFF2D1810)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawCircle(center, 24, outlinePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+// Gap Painter (hole in ground)
+class _GapPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Dark hole
+    final holePaint = Paint()..color = const Color(0xFF1A1A1A);
+    canvas.drawRect(Rect.fromLTWH(10, 0, 60, size.height), holePaint);
+
+    // Depth gradient
+    final depthGradient = LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [
+        const Color(0xFF2D2D2D),
+        const Color(0xFF0D0D0D),
+        Colors.black,
+      ],
+    );
+    final depthPaint = Paint()
+      ..shader = depthGradient.createShader(Rect.fromLTWH(10, 0, 60, size.height));
+    canvas.drawRect(Rect.fromLTWH(15, 10, 50, size.height - 10), depthPaint);
+
+    // Edge highlights (crumbling dirt)
+    final dirtPaint = Paint()..color = const Color(0xFF5D4037);
+    canvas.drawRect(Rect.fromLTWH(5, 0, 10, 15), dirtPaint);
+    canvas.drawRect(Rect.fromLTWH(65, 0, 10, 15), dirtPaint);
+
+    // Warning sign
+    final warnPaint = Paint()..color = const Color(0xFFFF5722);
+    canvas.drawCircle(const Offset(40, -10), 8, warnPaint);
+    final exclaim = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(40, -14), const Offset(40, -8), exclaim);
+    canvas.drawCircle(const Offset(40, -5), 1.5, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// Swinging Rope Painter
+class _SwingingRopePainter extends CustomPainter {
+  final Obstacle obstacle;
+  _SwingingRopePainter(this.obstacle);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+
+    // Pivot point at top
+    final pivotX = size.width / 2;
+    canvas.translate(pivotX, 0);
+    canvas.rotate(obstacle.swingAngle);
+    canvas.translate(-pivotX, 0);
+
+    // Rope
+    final ropePaint = Paint()
+      ..color = const Color(0xFF8B7355)
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(
+      Offset(size.width / 2, 0),
+      Offset(size.width / 2, 95),
+      ropePaint,
+    );
+
+    // Rope texture
+    final texturePaint = Paint()
+      ..color = const Color(0xFF6B5344)
+      ..strokeWidth = 1;
+    for (double y = 5; y < 95; y += 8) {
+      canvas.drawLine(
+        Offset(size.width / 2 - 2, y),
+        Offset(size.width / 2 + 2, y + 3),
+        texturePaint,
+      );
+    }
+
+    // Weight at bottom (spiked ball)
+    final weightCenter = Offset(size.width / 2, 105);
+    final ballPaint = Paint()..color = const Color(0xFF424242);
+    canvas.drawCircle(weightCenter, 15, ballPaint);
+
+    // Spikes on ball
+    final spikePaint = Paint()..color = const Color(0xFF212121);
+    for (int i = 0; i < 8; i++) {
+      final angle = i * pi / 4;
+      final startX = weightCenter.dx + cos(angle) * 12;
+      final startY = weightCenter.dy + sin(angle) * 12;
+      final endX = weightCenter.dx + cos(angle) * 20;
+      final endY = weightCenter.dy + sin(angle) * 20;
+
+      final spikePath = Path()
+        ..moveTo(startX - cos(angle + pi/2) * 3, startY - sin(angle + pi/2) * 3)
+        ..lineTo(endX, endY)
+        ..lineTo(startX + cos(angle + pi/2) * 3, startY + sin(angle + pi/2) * 3)
+        ..close();
+      canvas.drawPath(spikePath, spikePaint);
+    }
+
+    // Highlight
+    canvas.drawCircle(
+      Offset(weightCenter.dx - 4, weightCenter.dy - 4),
+      4,
+      Paint()..color = const Color(0xFF757575),
+    );
+
+    canvas.restore();
+
+    // Pivot mount at top
+    final mountPaint = Paint()..color = const Color(0xFF5D4037);
+    canvas.drawRect(Rect.fromLTWH(size.width / 2 - 8, -5, 16, 10), mountPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+// Mud Puddle Painter
+class _MudPuddlePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Mud puddle (brown oval)
+    final mudGradient = RadialGradient(
+      colors: [
+        const Color(0xFF5D4037),
+        const Color(0xFF4E342E),
+        const Color(0xFF3E2723),
+      ],
+    );
+    final mudPaint = Paint()
+      ..shader = mudGradient.createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+
+    final path = Path()
+      ..addOval(Rect.fromLTWH(0, 5, size.width, size.height - 5));
+    canvas.drawPath(path, mudPaint);
+
+    // Bubbles
+    final bubblePaint = Paint()
+      ..color = const Color(0xFF6D4C41)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    canvas.drawCircle(Offset(size.width * 0.3, size.height * 0.5), 4, bubblePaint);
+    canvas.drawCircle(Offset(size.width * 0.6, size.height * 0.4), 3, bubblePaint);
+    canvas.drawCircle(Offset(size.width * 0.8, size.height * 0.6), 2, bubblePaint);
+
+    // Shine
+    final shinePaint = Paint()
+      ..color = const Color(0xFF8D6E63).withValues(alpha: 0.5);
+    canvas.drawOval(
+      Rect.fromLTWH(size.width * 0.2, size.height * 0.3, 20, 6),
+      shinePaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// Fire Jet Painter
+class _FireJetPainter extends CustomPainter {
+  final Obstacle obstacle;
+  _FireJetPainter(this.obstacle);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Base (metal grate)
+    final basePaint = Paint()..color = const Color(0xFF424242);
+    canvas.drawRect(Rect.fromLTWH(5, size.height - 15, 30, 15), basePaint);
+
+    // Grate holes
+    final holePaint = Paint()..color = const Color(0xFF212121);
+    for (double x = 10; x < 35; x += 8) {
+      canvas.drawCircle(Offset(x, size.height - 8), 2, holePaint);
+    }
+
+    // Fire (only when active)
+    if (obstacle.fireActive) {
+      final fireColors = [
+        const Color(0xFFFFEB3B), // Yellow core
+        const Color(0xFFFF9800), // Orange
+        const Color(0xFFFF5722), // Red-orange
+        const Color(0xFFE64A19), // Dark orange
+      ];
+
+      // Animated flame shape
+      final time = obstacle.animationTime * 5;
+
+      for (int i = 0; i < 3; i++) {
+        final flameOffset = sin(time + i) * 3;
+        final flameHeight = 55.0 + sin(time * 2 + i) * 8;
+
+        final flamePath = Path()
+          ..moveTo(8 + i * 8 + flameOffset, size.height - 15)
+          ..quadraticBezierTo(
+            5 + i * 8, size.height - 15 - flameHeight / 2,
+            20 + flameOffset, size.height - 15 - flameHeight,
+          )
+          ..quadraticBezierTo(
+            35 + i * 2, size.height - 15 - flameHeight / 2,
+            32 - i * 8 + flameOffset, size.height - 15,
+          )
+          ..close();
+
+        final flamePaint = Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: fireColors,
+          ).createShader(Rect.fromLTWH(0, 0, size.width, size.height - 15));
+
+        canvas.drawPath(flamePath, flamePaint);
+      }
+
+      // Glow effect
+      final glowPaint = Paint()
+        ..color = const Color(0xFFFF9800).withValues(alpha: 0.3)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+      canvas.drawCircle(Offset(20, size.height - 40), 25, glowPaint);
+    } else {
+      // Smoke when inactive
+      final smokePaint = Paint()
+        ..color = const Color(0xFF757575).withValues(alpha: 0.3);
+      canvas.drawCircle(Offset(20, size.height - 25), 5, smokePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

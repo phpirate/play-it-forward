@@ -7,6 +7,7 @@ import '../managers/audio_manager.dart';
 import '../managers/power_up_manager.dart';
 import '../managers/character_manager.dart';
 import '../managers/tutorial_manager.dart';
+import '../managers/level_manager.dart';
 import '../models/character.dart';
 import '../effects/particle_factory.dart';
 import '../effects/squash_stretch.dart';
@@ -31,9 +32,19 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
   final int maxJumps = 2;
 
   // Dash constants
-  final double dashDuration = 0.25;
+  static const double _baseDashDuration = 0.25;
   final double dashCooldown = 2.5;
   final double dashSpeedMultiplier = 2.5;
+
+  /// Get effective dash duration with follower bonus (Sam the Traveler, Doctor Grace)
+  double get dashDuration {
+    double duration = _baseDashDuration;
+    if (LevelManager.instance.isPlayingCampaign) {
+      final bonus = LevelManager.instance.cumulativeBonus;
+      duration *= (1 + bonus.dashDurationBonus);
+    }
+    return duration;
+  }
 
   // Glide constants
   final double glideGravityMultiplier = 0.25;
@@ -49,19 +60,39 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
   }
 
   double get jumpForce {
+    double force = _baseJumpForce;
+
+    // Character ability modifier
     final ability = CharacterManager.instance.selectedCharacter.ability;
     if (ability == CharacterAbility.lowGravity) {
-      return _baseJumpForce * 1.15; // Higher jumps
+      force *= 1.15; // Higher jumps
     }
-    return _baseJumpForce;
+
+    // Follower bonus (Rosa the Artist)
+    if (LevelManager.instance.isPlayingCampaign) {
+      final bonus = LevelManager.instance.cumulativeBonus;
+      force *= (1 + bonus.jumpHeightBonus);
+    }
+
+    return force;
   }
 
   double get airJumpForce {
+    double force = _baseAirJumpForce;
+
+    // Character ability modifier
     final ability = CharacterManager.instance.selectedCharacter.ability;
     if (ability == CharacterAbility.lowGravity) {
-      return _baseAirJumpForce * 1.15;
+      force *= 1.15;
     }
-    return _baseAirJumpForce;
+
+    // Follower bonus (Rosa the Artist)
+    if (LevelManager.instance.isPlayingCampaign) {
+      final bonus = LevelManager.instance.cumulativeBonus;
+      force *= (1 + bonus.jumpHeightBonus);
+    }
+
+    return force;
   }
 
   double get maxGlideDuration {
@@ -106,6 +137,12 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
   // Stone throwing while riding
   double _throwCooldown = 0;
   static const double throwCooldownDuration = 0.3; // Can throw every 0.3 seconds
+
+  // Mud slow effect
+  bool _inMud = false;
+  double _mudSlowTimer = 0;
+  static const double mudSlowDuration = 0.5; // Slow effect lasts 0.5 seconds after leaving mud
+
   bool isOnGround = true;
   bool isJumping = false;
   double jumpHoldTime = 0;
@@ -1012,6 +1049,7 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
 
   void jump() {
     if (isSliding) return; // Can't jump while sliding
+    if (_isRidingBird) return; // Can't jump while riding
 
     // Wall jump
     if (_isWallSliding && _isTouchingWall) {
@@ -1046,6 +1084,7 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
       // Double jump (air jump)
       velocityY = airJumpForce;
       _jumpCount++;
+      jumpHoldTime = 0; // Disable extended jump after double jump
       AudioManager.instance.playSfx('jump.mp3');
 
       // Spawn double jump ring effect
@@ -1054,8 +1093,8 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
       if (ring != null) {
         gameRef.add(ring);
       }
-    } else if (isJumping && jumpHoldTime > 0) {
-      // Extended jump while holding (only for first jump)
+    } else if (_jumpCount == 1 && isJumping && jumpHoldTime > 0) {
+      // Extended jump while holding (only for first jump, before double jump)
       velocityY = jumpForce * 0.6;
     }
   }
@@ -1154,8 +1193,19 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
   void endRiding() {
     _isRidingBird = false;
     _currentBird = null;
-    // Give a small upward boost when dismounting
-    velocityY = jumpForce * 0.4;
+
+    // Reset all states to ensure clean transition to falling
+    velocityY = 50; // Small downward velocity to start falling immediately
+    isOnGround = false;
+    isJumping = false;
+    _jumpCount = 1; // Allow one more jump after dismount for safety
+    jumpHoldTime = 0;
+    _isGliding = false;
+    _glideTimer = 0;
+    _glideHeld = false;
+    _isGroundPounding = false;
+    _isDashing = false;
+    _dashTimer = 0;
   }
 
   void _updateRiding(double dt) {
@@ -1167,6 +1217,14 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
     // Update throw cooldown
     if (_throwCooldown > 0) {
       _throwCooldown -= dt;
+    }
+
+    // Update mud slow timer
+    if (_mudSlowTimer > 0) {
+      _mudSlowTimer -= dt;
+      if (_mudSlowTimer <= 0) {
+        _inMud = false;
+      }
     }
 
     // Player is excited while riding
@@ -1192,6 +1250,18 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
   }
 
   bool get canThrowStone => _isRidingBird && _throwCooldown <= 0;
+
+  /// Whether player is currently slowed by mud
+  bool get isInMud => _inMud || _mudSlowTimer > 0;
+
+  /// Apply mud slow effect (called by mud puddle obstacle)
+  void applyMudSlow() {
+    _inMud = true;
+    _mudSlowTimer = mudSlowDuration;
+  }
+
+  /// Get the speed multiplier (affected by mud)
+  double get mudSpeedMultiplier => isInMud ? 0.5 : 1.0; // 50% speed in mud
 
   void stopSlide() {
     if (!isSliding) return;
@@ -1237,6 +1307,8 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
     _isRidingBird = false;
     _currentBird = null;
     _throwCooldown = 0;
+    _inMud = false;
+    _mudSlowTimer = 0;
 
     // Reset scarf positions
     for (int i = 0; i < _scarfPoints.length; i++) {
@@ -1250,6 +1322,51 @@ class Player extends PositionComponent with HasGameRef<PlayItForwardGame>, Colli
     stopSlide();
     _showingShield = false;
     _animController.reset();
+  }
+
+  /// Respawn player after losing a life (keeps position, resets state)
+  void respawn() {
+    final groundY = gameRef.ground.getGroundYAt(position.x);
+    position = Vector2(position.x, groundY);
+    velocityY = 0;
+    _prevVelocityY = 0;
+    isOnGround = true;
+    isJumping = false;
+    _jumpCount = 0;
+    _wasOnGround = true;
+    _nearMissedObjects.clear();
+
+    // Reset ability states
+    _isDashing = false;
+    _dashTimer = 0;
+    _dashCooldownTimer = 0;
+    _dashCount = 0;
+    _isGliding = false;
+    _glideTimer = 0;
+    _glideHeld = false;
+    _isGroundPounding = false;
+    _isTouchingWall = false;
+    _isWallSliding = false;
+    _currentWall = null;
+    _isRidingBird = false;
+    _currentBird = null;
+    _throwCooldown = 0;
+
+    // Reset scarf positions
+    for (int i = 0; i < _scarfPoints.length; i++) {
+      _scarfPoints[i] = Vector2(position.x - i * 8, position.y - 45);
+    }
+
+    // Reset death animation
+    _isDying = false;
+    _deathTimer = 0;
+    _deathRotation = 0;
+    stopSlide();
+    _showingShield = false;
+    _animController.reset();
+
+    // Show worried expression briefly
+    setWorried();
   }
 
   /// Check for near-miss with an obstacle/bird

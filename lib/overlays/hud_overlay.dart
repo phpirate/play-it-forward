@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../game/play_it_forward_game.dart';
 import '../managers/power_up_manager.dart';
 import '../managers/fever_manager.dart';
+import '../managers/level_manager.dart';
 
 class HudOverlay extends StatelessWidget {
   final PlayItForwardGame game;
@@ -40,7 +41,19 @@ class HudOverlay extends StatelessWidget {
               ],
             ),
 
-            // Coins, Souls and Combo row
+            // Level progress bar (campaign mode only)
+            if (LevelManager.instance.isPlayingCampaign)
+              _buildLevelProgressBar(),
+
+            const SizedBox(height: 4),
+
+            // Lives indicator (campaign mode only)
+            if (LevelManager.instance.isPlayingCampaign)
+              _buildLivesWidget(),
+
+            const SizedBox(height: 4),
+
+            // Coins, Souls, Combo and Followers row
             Row(
               children: [
                 _buildCoinWidget(),
@@ -48,6 +61,10 @@ class HudOverlay extends StatelessWidget {
                 _buildSoulsWidget(),
                 const SizedBox(width: 10),
                 _buildComboWidget(),
+                if (LevelManager.instance.isPlayingCampaign) ...[
+                  const SizedBox(width: 10),
+                  _buildFollowerWidget(),
+                ],
               ],
             ),
 
@@ -70,6 +87,170 @@ class HudOverlay extends StatelessWidget {
             _buildAbilityIndicators(),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildLevelProgressBar() {
+    return ListenableBuilder(
+      listenable: LevelManager.instance,
+      builder: (context, child) {
+        final levelManager = LevelManager.instance;
+        final level = levelManager.currentLevel;
+        if (level == null) return const SizedBox.shrink();
+
+        final progress = levelManager.levelProgress;
+        final currentDistance = levelManager.currentDistance.toInt();
+        final targetDistance = level.targetDistance.toInt();
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black38,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    level.icon,
+                    color: level.themeColor,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Level ${level.number}: ${level.npcToHelp.name}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    '${currentDistance}m / ${targetDistance}m',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.white.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              SizedBox(
+                width: 200,
+                child: Stack(
+                  children: [
+                    Container(
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      height: 8,
+                      width: 200 * progress,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            level.themeColor,
+                            level.themeColor.withValues(alpha: 0.7),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    // Goal flag at end
+                    Positioned(
+                      right: 0,
+                      top: -2,
+                      child: Icon(
+                        Icons.flag,
+                        size: 12,
+                        color: progress >= 1.0 ? Colors.green : Colors.amber,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLivesWidget() {
+    return ValueListenableBuilder<int>(
+      valueListenable: _LivesNotifier(game),
+      builder: (context, lives, child) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black38,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Lives: ',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white70,
+                ),
+              ),
+              ...List.generate(PlayItForwardGame.maxLives, (index) {
+                final isActive = index < game.lives;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Icon(
+                    isActive ? Icons.favorite : Icons.favorite_border,
+                    color: isActive ? Colors.red : Colors.red.withValues(alpha: 0.3),
+                    size: 20,
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildFollowerWidget() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.pink.shade700,
+            Colors.pink.shade600,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.people, color: Colors.white, size: 18),
+          const SizedBox(width: 5),
+          Text(
+            '${game.followerCount}',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -276,27 +457,32 @@ class HudOverlay extends StatelessWidget {
   }
 
   Widget _buildCoinWidget() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black45,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.monetization_on, color: Colors.amber, size: 24),
-          const SizedBox(width: 5),
-          Text(
-            '${game.coins}',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
+    return ValueListenableBuilder<int>(
+      valueListenable: _CoinsNotifier(game),
+      builder: (context, coins, child) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black45,
+            borderRadius: BorderRadius.circular(10),
           ),
-        ],
-      ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.monetization_on, color: Colors.amber, size: 24),
+              const SizedBox(width: 5),
+              Text(
+                '${game.coins}',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -659,6 +845,40 @@ class _SoulsNotifier extends ValueNotifier<int> {
     Future.delayed(const Duration(milliseconds: 100), () {
       if (game.gameState == GameState.playing) {
         value = game.souls;
+        _update();
+      }
+    });
+  }
+}
+
+class _LivesNotifier extends ValueNotifier<int> {
+  final PlayItForwardGame game;
+
+  _LivesNotifier(this.game) : super(5) {
+    _update();
+  }
+
+  void _update() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (game.gameState == GameState.playing) {
+        value = game.lives;
+        _update();
+      }
+    });
+  }
+}
+
+class _CoinsNotifier extends ValueNotifier<int> {
+  final PlayItForwardGame game;
+
+  _CoinsNotifier(this.game) : super(0) {
+    _update();
+  }
+
+  void _update() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (game.gameState == GameState.playing) {
+        value = game.coins;
         _update();
       }
     });
